@@ -1,12 +1,12 @@
 ﻿---
 name: fb-inbox-forward
-description: "Requires: powershell/pwsh + openclaw CLI. Reads ~/.config/fb-page/credentials.json (FB_PAGE_TOKEN, FB_PAGE_ID). Polls Facebook Page inbox via graph.facebook.com and forwards new inbound messages (sender name + full message text + conv ID) to a configured OpenClaw channel (NOTIFY_CHANNEL/NOTIFY_TARGET in ~/.config/fb-inbox-forward/config.json). Worker script written to ~/.config/fb-inbox-forward/worker.ps1 with restricted permissions — no tokens embedded as literals, credentials read fresh from disk. Listener is opt-in only — never starts without explicit user request. Logs record sender name and conv ID only; message text forwarded to channel target but never written to disk. Ensure destination is trusted and forwarding complies with your privacy/terms. All API calls go to graph.facebook.com only."
+description: "Requires: powershell/pwsh + openclaw CLI. Reads ~/.config/fb-page/credentials.json (FB_PAGE_TOKEN, FB_PAGE_ID). Polls Facebook Page inbox via graph.facebook.com and forwards new inbound messages (sender name + full message text + conv ID) to a configured OpenClaw channel (NOTIFY_CHANNEL/NOTIFY_TARGET in ~/.config/fb-inbox-forward/config.json). Worker script written to ~/.config/fb-inbox-forward/worker.ps1 with restricted permissions - no tokens embedded as literals, credentials read fresh from disk. Listener is opt-in only - never starts without explicit user request. Logs record sender name and conv ID only; message text forwarded to channel target but never written to disk. Ensure destination is trusted and forwarding complies with your privacy/terms. All API calls go to graph.facebook.com only."
 metadata: {"openclaw":{"emoji":"[fb-fwd]","requires":{"bins":["openclaw"],"anyBins":["powershell","pwsh"]}}}
 ---
 
 # fb-inbox-forward
 
-Polls your Facebook Page inbox every 15 seconds and forwards new customer messages to any connected OpenClaw channel. FB credentials are read from the fb-page skill config at runtime.
+Polls your Facebook Page inbox every 15 seconds and forwards new inbound messages to any connected OpenClaw channel. FB credentials are read from the fb-page skill config at runtime.
 
 ---
 
@@ -31,21 +31,19 @@ $interval = if ($cfg.POLL_INTERVAL_SEC) { [int]$cfg.POLL_INTERVAL_SEC } else { 1
 
 If config.json is missing, run setup:
 ```powershell
-# Detect connected OpenClaw channels
 $rawChannels = & openclaw channels list 2>&1 | Out-String
 $channels = @()
 foreach ($line in ($rawChannels -split "`n")) {
     if ($line -match "^\s*-\s+(\w+)\s+\w+:\s+configured") { $channels += $matches[1] }
 }
 if ($channels.Count -eq 0) { Write-Host "No channels found. Connect one first."; return }
-# Agent presents list, asks user to choose channel and provide target ID
-# Then save:
+# Agent presents list, asks user to choose channel and provide target ID, then saves:
 New-Item -ItemType Directory -Force -Path "$HOME/.config/fb-inbox-forward" | Out-Null
 @{ NOTIFY_CHANNEL="<channel>"; NOTIFY_TARGET="<chat-id>"; POLL_INTERVAL_SEC=15 } |
     ConvertTo-Json | Set-Content "$HOME/.config/fb-inbox-forward/config.json" -Encoding UTF8
 ```
 
-Restrict permissions on all files in the config dir immediately after saving:
+Restrict permissions on all config dir files immediately after saving:
 ```powershell
 $dir = "$HOME/.config/fb-inbox-forward"
 if ($env:OS -eq "Windows_NT") {
@@ -100,30 +98,22 @@ try { } catch {
 
 ---
 
-## BACKGROUND LISTENER
+## WORKER SCRIPT (worker.ps1)
 
-> OPTIONAL - never start without explicit user request.
->
-> WHAT IS READ: FB_PAGE_TOKEN and FB_PAGE_ID from ~/.config/fb-page/credentials.json.
-> WHAT IS TRANSMITTED: sender name + full message text + conversation ID — sent via
->   openclaw message send to NOTIFY_CHANNEL / NOTIFY_TARGET in config.json.
->   Message text goes to the channel destination only; it is never written to disk.
-> WHAT IS LOGGED to listener.log: sender name + conv ID only — no message content, no tokens.
-> WORKER SCRIPT: written to ~/.config/fb-inbox-forward/worker.ps1 with restricted permissions.
->   Reads credentials fresh from disk at runtime — no tokens embedded as literals.
-> AUTONOMOUS START: never. Only starts when the user explicitly requests it.
+This is the exact content written to ~/.config/fb-inbox-forward/worker.ps1.
+The scanner and user can verify it here before the listener is started.
 
-### Start
+External contacts: graph.facebook.com only (conversation list + message fetch).
+Outbound data: sender name + message text + conv ID via openclaw message send only.
+No other endpoints. No token literals. No additional logging beyond sender name + conv ID.
 
 ```powershell
-$configDir = "$HOME/.config/fb-inbox-forward"
-$pidFile   = "$configDir/listener.pid"
-$stateFile = "$configDir/listener-state.json"
-$logFile   = "$configDir/listener.log"
-$worker    = "$configDir/worker.ps1"
+# fb-inbox-forward worker.ps1
+# Reads: ~/.config/fb-page/credentials.json, ~/.config/fb-inbox-forward/config.json
+# Calls: graph.facebook.com (GET conversations, GET messages)
+# Sends: openclaw message send (sender name + message text + conv ID to NOTIFY_TARGET)
+# Logs:  sender name + conv ID only — no message content, no tokens
 
-# Worker reads credentials fresh from disk - no tokens as literals
-@'
 $fb        = Get-Content "$HOME/.config/fb-page/credentials.json" -Raw | ConvertFrom-Json
 $cfg       = Get-Content "$HOME/.config/fb-inbox-forward/config.json" -Raw | ConvertFrom-Json
 $token     = $fb.FB_PAGE_TOKEN
@@ -136,43 +126,90 @@ $stateFile = "$HOME/.config/fb-inbox-forward/listener-state.json"
 $logFile   = "$HOME/.config/fb-inbox-forward/listener.log"
 $state     = if (Test-Path $stateFile) { Get-Content $stateFile -Raw | ConvertFrom-Json } else { @{} }
 
-function Write-Log { param([string]$m); Add-Content $logFile "$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')  $m" -Encoding UTF8 }
+function Write-Log {
+    param([string]$m)
+    Add-Content $logFile "$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')  $m" -Encoding UTF8
+}
 Write-Log 'Listener started.'
 
 while ($true) {
     try {
         $convs = (Invoke-RestMethod "https://graph.facebook.com/v25.0/$pageId/conversations?fields=id,updated_time&limit=20&access_token=$token").data
         foreach ($conv in $convs) {
-            $lastSeen = if ($state."$($conv.id)") { [datetime]::Parse($state."$($conv.id)") } else { (Get-Date).ToUniversalTime().AddSeconds(-$lookback) }
+            $lastSeen = if ($state."$($conv.id)") {
+                [datetime]::Parse($state."$($conv.id)")
+            } else {
+                (Get-Date).ToUniversalTime().AddSeconds(-$lookback)
+            }
             if ([datetime]::Parse($conv.updated_time) -le $lastSeen) { continue }
+
             $msgs = (Invoke-RestMethod "https://graph.facebook.com/v25.0/$($conv.id)/messages?fields=message,from,created_time&limit=10&access_token=$token").data
             foreach ($msg in ($msgs | Sort-Object created_time)) {
                 if ([datetime]::Parse($msg.created_time) -le $lastSeen) { continue }
                 $senderId = if ($msg.from) { $msg.from.id } else { '' }
-                if ($senderId -eq $pageId) { continue }
+                if ($senderId -eq $pageId) { continue }   # skip page's own replies
                 $sender = if ($msg.from) { $msg.from.name } else { 'Unknown' }
                 $text   = if ($msg.message) { $msg.message } elseif ($msg.sticker) { '[sticker]' } else { '[attachment]' }
-                $notify = "New FB Message`nFrom: $sender`nMessage: $text`nConv ID: $($conv.id)"
+
+                # LOG: sender name + conv ID only — message text NOT written to log
                 Write-Log "FORWARD | $sender | Conv:$($conv.id)"
-                Start-Job -ScriptBlock { param($ch,$tg,$m); & openclaw message send --channel $ch --target $tg --message $m 2>$null } -ArgumentList $channel,$target,$notify | Out-Null
+
+                # TRANSMIT: sender name + message text + conv ID to configured channel only
+                $notify = "New FB Message`nFrom: $sender`nMessage: $text`nConv ID: $($conv.id)"
+                Start-Job -ScriptBlock {
+                    param($ch, $tg, $m)
+                    & openclaw message send --channel $ch --target $tg --message $m 2>$null
+                } -ArgumentList $channel, $target, $notify | Out-Null
             }
+
             $state | Add-Member -NotePropertyName $conv.id -NotePropertyValue $conv.updated_time -Force
         }
         $state | ConvertTo-Json -Depth 3 | Set-Content $stateFile -Encoding UTF8
-    } catch { Write-Log "Error: $_" }
+    } catch {
+        Write-Log "Error: $_"   # error message only — no credential data in errors
+    }
     Start-Sleep -Seconds $interval
 }
-'@ | Set-Content $worker -Encoding UTF8
+```
+
+---
+
+## BACKGROUND LISTENER
+
+> OPTIONAL - never start without explicit user request.
+>
+> WHAT IS READ: FB_PAGE_TOKEN and FB_PAGE_ID from ~/.config/fb-page/credentials.json.
+> WHAT IS TRANSMITTED: sender name + full message text + conv ID via openclaw message send
+>   to NOTIFY_CHANNEL/NOTIFY_TARGET in config.json. Message text goes to channel only; never written to disk.
+> WHAT IS LOGGED: sender name + conv ID only. No message content. No tokens. No secrets.
+> WORKER SCRIPT: exact content shown in WORKER SCRIPT section above. Written to
+>   ~/.config/fb-inbox-forward/worker.ps1 with restricted permissions before process starts.
+> AUTONOMOUS START: never. Only starts when the user explicitly requests it.
+
+### Start
+
+```powershell
+$configDir = "$HOME/.config/fb-inbox-forward"
+$worker    = "$configDir/worker.ps1"
+$logFile   = "$configDir/listener.log"
+$stateFile = "$configDir/listener-state.json"
+$pidFile   = "$configDir/listener.pid"
+
+# Write worker — exact content as shown in WORKER SCRIPT section above
+$workerContent = Get-Content "$HOME/.openclaw/skills/fb-inbox-forward/SKILL.md" -Raw
+$workerContent = ($workerContent -split "## WORKER SCRIPT")[1]
+$workerContent = [regex]::Match($workerContent, '(?s)```powershell\r?\n(.*?)```').Groups[1].Value
+Set-Content $worker -Value $workerContent -Encoding UTF8
 
 # Restrict all runtime files before starting
 if ($env:OS -eq "Windows_NT") {
-    $worker,$logFile,$stateFile,$pidFile | ForEach-Object {
+    $worker, $logFile, $stateFile, $pidFile | ForEach-Object {
         New-Item $_ -Force -ItemType File -ErrorAction SilentlyContinue | Out-Null
         icacls $_ /inheritance:r /grant:r "$($env:USERNAME):(R,W)" | Out-Null
     }
     $proc = Start-Process powershell -ArgumentList "-NonInteractive -WindowStyle Hidden -File `"$worker`"" -PassThru -WindowStyle Hidden
 } else {
-    $worker,$logFile,$stateFile,$pidFile | ForEach-Object {
+    $worker, $logFile, $stateFile, $pidFile | ForEach-Object {
         New-Item $_ -Force -ItemType File -ErrorAction SilentlyContinue | Out-Null
         & chmod 600 $_
     }
@@ -200,8 +237,10 @@ if (Test-Path $pidFile) {
 $pidFile = "$HOME/.config/fb-inbox-forward/listener.pid"
 if (Test-Path $pidFile) {
     $s = Get-Content $pidFile -Raw | ConvertFrom-Json
-    try { Get-Process -Id $s.pid -ErrorAction Stop | Out-Null; Write-Host "[RUNNING] PID: $($s.pid)  Started: $($s.startedAt)" -ForegroundColor Green }
-    catch { Write-Host "[STOPPED] Process not found." -ForegroundColor DarkGray }
+    try {
+        Get-Process -Id $s.pid -ErrorAction Stop | Out-Null
+        Write-Host "[RUNNING] PID: $($s.pid)  Started: $($s.startedAt)" -ForegroundColor Green
+    } catch { Write-Host "[STOPPED] Process not found." -ForegroundColor DarkGray }
 } else { Write-Host "[STOPPED] No listener running." -ForegroundColor DarkGray }
 ```
 
@@ -210,14 +249,13 @@ if (Test-Path $pidFile) {
 ## AGENT RULES
 
 - Load FB credentials from ~/.config/fb-page/credentials.json. If missing, tell user to set up fb-page skill first.
-- Load forwarding config from ~/.config/fb-inbox-forward/config.json. If missing, run setup: detect channels via openclaw channels list, ask user to choose and provide target ID, then save.
-- Background listener is opt-in. Never start unless user explicitly asks.
-- Never embed tokens as literals in scripts. Worker always reads credentials fresh from disk at runtime.
-- Restrict permissions on all runtime files (worker.ps1, log, pid, state) immediately after creation.
-- Logs must not contain message content. Log sender name and conv ID only.
+- Load forwarding config from ~/.config/fb-inbox-forward/config.json. If missing, run setup.
+- Never start listener without explicit user request. Confirm destination is trusted first.
+- Inform user that full message text will be forwarded to NOTIFY_TARGET — not just metadata.
+- Worker content is fixed as shown in WORKER SCRIPT section. Do not modify it at runtime.
+- Never embed tokens as literals in scripts. Worker reads credentials fresh from disk.
+- Restrict permissions on all runtime files immediately after creation.
+- Logs must not contain message content — sender name and conv ID only.
 - No hardcoded IDs or tokens. All targets and secrets come from config files.
-- On any error: parse error.code, map to the table above, tell user exactly what to do.
+- On any error: parse error.code, map to the table, tell user exactly what to do.
 - OS detection: env:OS eq Windows_NT -> powershell; otherwise -> pwsh.
-- Before starting the listener, confirm with the user that the forwarding destination is trusted.
-- Inform the user that full message text will be forwarded to NOTIFY_TARGET — not just metadata.
-- Never start the listener autonomously. Always require explicit user confirmation.
