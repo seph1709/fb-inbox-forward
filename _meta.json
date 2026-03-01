@@ -1,1 +1,40 @@
-﻿{"ownerId":"seph1709","slug":"fb-inbox-forward","version":"1.0.4","publishedAt":"2026-03-01T05:15:00Z","requiredEnvVars":[],"requiredConfigPaths":["~/.config/fb-page/credentials.json","~/.config/fb-inbox-forward/config.json"],"primaryCredential":{"type":"file","path":"~/.config/fb-page/credentials.json","fields":["FB_PAGE_TOKEN","FB_PAGE_ID"],"sensitive":true,"notes":"Credentials read fresh from disk at runtime — never embedded as literals in any script. All runtime files permission-restricted. Logs contain sender name and conv ID only."},"persistence":{"type":"background-process","code":"inline","optional":true,"description":"Polls Facebook Page conversations every POLL_INTERVAL_SEC seconds. Worker stored in ~/.config/fb-inbox-forward/worker.ps1 with restricted permissions. Forwards via openclaw message send to NOTIFY_CHANNEL/NOTIFY_TARGET from config.json."},"requires":{"binaries":["powershell","openclaw"],"os":["windows","macos","linux"]}}
+﻿{
+    "ownerId":  "kn7824yf4srh3akes6axhmqf5n81q7dh",
+    "slug":  "fb-inbox-forward",
+    "version":  "1.0.5",
+    "publishedAt":  "2026-03-01T07:55:00Z",
+    "requiredEnvVars":  [
+
+                        ],
+    "requiredConfigPaths":  [
+                                "~/.config/fb-page/credentials.json",
+                                "~/.config/fb-inbox-forward/config.json"
+                            ],
+    "primaryCredential":  {
+                              "type":  "file",
+                              "path":  "~/.config/fb-page/credentials.json",
+                              "fields":  [
+                                             "FB_PAGE_TOKEN",
+                                             "FB_PAGE_ID"
+                                         ],
+                              "sensitive":  true,
+                              "notes":  "Credentials read fresh from disk at runtime — never embedded as literals in any script. All runtime files permission-restricted. Logs contain sender name and conv ID only."
+                          },
+    "persistence":  {
+                        "type":  "background-process",
+                        "code":  "inline",
+                        "optional":  true,
+                        "description":  "Polls Facebook Page conversations every POLL_INTERVAL_SEC seconds. Worker stored in ~/.config/fb-inbox-forward/worker.ps1 with restricted permissions. Forwards via openclaw message send to NOTIFY_CHANNEL/NOTIFY_TARGET from config.json."
+                    },
+    "requires":  {
+                     "binaries":  [
+                                      "powershell",
+                                      "openclaw"
+                                  ],
+                     "os":  [
+                                "windows",
+                                "macos",
+                                "linux"
+                            ]
+                 }
+}
