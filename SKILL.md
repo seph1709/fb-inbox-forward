@@ -1,6 +1,6 @@
 ﻿---
 name: fb-inbox-forward
-description: Polls Facebook Page inbox and forwards new messages to a configured OpenClaw notification channel (e.g. Telegram). Use when the user wants to be notified of Facebook Page messages via another platform, or wants to start/stop/check the status of the inbox listener. FB credentials are synced from the fb-page skill. Requires powershell (Windows) or pwsh (macOS/Linux) and the openclaw CLI.
+description: "Polls Facebook Page inbox via graph.facebook.com and forwards new inbound messages (sender name + full message text + conversation ID) to a configured OpenClaw channel. Requires: powershell (Windows) or pwsh (macOS/Linux); openclaw CLI on PATH; credentials file at ~/.config/fb-page/credentials.json (FB_PAGE_TOKEN, FB_PAGE_ID from fb-page skill); forwarding config at ~/.config/fb-inbox-forward/config.json (NOTIFY_CHANNEL, NOTIFY_TARGET). Writes a worker script to ~/.config/fb-inbox-forward/worker.ps1 with restricted permissions (icacls/chmod 600) — no tokens embedded as literals. Listener is opt-in only — never starts without explicit user request. Logs record sender name and conv ID only; full message text is forwarded to the configured channel target but never written to disk. Ensure the forwarding destination is trusted and that forwarding complies with your platform terms and privacy obligations. All API calls go to graph.facebook.com only."
 ---
 
 # fb-inbox-forward
@@ -101,13 +101,16 @@ try { } catch {
 
 ## BACKGROUND LISTENER
 
-> OPTIONAL - only start when the user explicitly asks.
-> Polls Facebook Page inbox every POLL_INTERVAL_SEC seconds.
-> Forwards: sender name + message text + conv ID via openclaw message send.
-> Target comes from config.json NOTIFY_CHANNEL / NOTIFY_TARGET - nothing hardcoded.
-> Worker reads credentials fresh from disk at runtime - no tokens embedded in scripts.
-> All runtime files are permission-restricted immediately after creation.
-> Logs contain sender name and conv ID only - not message content.
+> OPTIONAL - never start without explicit user request.
+>
+> WHAT IS READ: FB_PAGE_TOKEN and FB_PAGE_ID from ~/.config/fb-page/credentials.json.
+> WHAT IS TRANSMITTED: sender name + full message text + conversation ID — sent via
+>   openclaw message send to NOTIFY_CHANNEL / NOTIFY_TARGET in config.json.
+>   Message text goes to the channel destination only; it is never written to disk.
+> WHAT IS LOGGED to listener.log: sender name + conv ID only — no message content, no tokens.
+> WORKER SCRIPT: written to ~/.config/fb-inbox-forward/worker.ps1 with restricted permissions.
+>   Reads credentials fresh from disk at runtime — no tokens embedded as literals.
+> AUTONOMOUS START: never. Only starts when the user explicitly requests it.
 
 ### Start
 
@@ -214,3 +217,6 @@ if (Test-Path $pidFile) {
 - No hardcoded IDs or tokens. All targets and secrets come from config files.
 - On any error: parse error.code, map to the table above, tell user exactly what to do.
 - OS detection: env:OS eq Windows_NT -> powershell; otherwise -> pwsh.
+- Before starting the listener, confirm with the user that the forwarding destination is trusted.
+- Inform the user that full message text will be forwarded to NOTIFY_TARGET — not just metadata.
+- Never start the listener autonomously. Always require explicit user confirmation.

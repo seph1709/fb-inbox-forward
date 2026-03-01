@@ -1,8 +1,8 @@
 ﻿{
     "ownerId":  "kn7824yf4srh3akes6axhmqf5n81q7dh",
     "slug":  "fb-inbox-forward",
-    "version":  "1.0.5",
-    "publishedAt":  "2026-03-01T07:55:00Z",
+    "version":  "1.0.6",
+    "publishedAt":  "2026-03-01T08:00:00Z",
     "requiredEnvVars":  [
 
                         ],
@@ -24,7 +24,7 @@
                         "type":  "background-process",
                         "code":  "inline",
                         "optional":  true,
-                        "description":  "Polls Facebook Page conversations every POLL_INTERVAL_SEC seconds. Worker stored in ~/.config/fb-inbox-forward/worker.ps1 with restricted permissions. Forwards via openclaw message send to NOTIFY_CHANNEL/NOTIFY_TARGET from config.json."
+                        "description":  "Polls Facebook Page conversations every POLL_INTERVAL_SEC seconds (default 15). Transmits: sender name + full message text + conv ID to NOTIFY_CHANNEL/NOTIFY_TARGET via openclaw message send. Message text goes to the channel destination only — never written to disk. Logs record sender name and conv ID only. Worker stored at ~/.config/fb-inbox-forward/worker.ps1 with restricted permissions. Credentials read fresh from disk at runtime — no tokens embedded as literals. Never starts autonomously — opt-in only."
                     },
     "requires":  {
                      "binaries":  [
