@@ -1,94 +1,88 @@
 ﻿---
 name: fb-inbox-forward
-description: Polls Facebook Page inbox and forwards new messages to a configured OpenClaw notification channel (e.g. Telegram). Use when the user wants to be notified of Facebook Page messages via another platform, or wants to start/stop/check the status of the inbox listener. FB credentials are synced from the fb-page skill — no duplicate setup needed.
+description: Polls Facebook Page inbox and forwards new messages to a configured OpenClaw notification channel (e.g. Telegram). Use when the user wants to be notified of Facebook Page messages via another platform, or wants to start/stop/check the status of the inbox listener. FB credentials are synced from the fb-page skill. Requires powershell (Windows) or pwsh (macOS/Linux) and the openclaw CLI.
 ---
 
-# fb-inbox-forward — Facebook Page Inbox Forwarder
+# fb-inbox-forward
 
-Polls your Facebook Page inbox every 15 seconds and forwards new customer messages to any connected OpenClaw channel.
-FB credentials synced from the `fb-page` skill.
+Polls your Facebook Page inbox every 15 seconds and forwards new customer messages to any connected OpenClaw channel. FB credentials are read from the fb-page skill config at runtime.
 
 ---
 
-## STEP 1 — Load Credentials
+## STEP 1 - Load Credentials
 
-**FB credentials** — from fb-page skill:
+FB credentials from fb-page skill:
 ```powershell
 $fb     = Get-Content "$HOME/.config/fb-page/credentials.json" -Raw | ConvertFrom-Json
 $token  = $fb.FB_PAGE_TOKEN
 $pageId = $fb.FB_PAGE_ID
 ```
 
-If `~/.config/fb-page/credentials.json` is missing → tell user to set up the `fb-page` skill first.
+If missing, tell user to set up the fb-page skill first.
 
-**Forwarding config** — `~/.config/fb-inbox-forward/config.json`:
+Forwarding config from ~/.config/fb-inbox-forward/config.json:
 ```powershell
 $cfg      = Get-Content "$HOME/.config/fb-inbox-forward/config.json" -Raw | ConvertFrom-Json
-$channel  = $cfg.NOTIFY_CHANNEL      # e.g. "telegram"
-$target   = $cfg.NOTIFY_TARGET       # numeric chat ID or channel target
+$channel  = $cfg.NOTIFY_CHANNEL
+$target   = $cfg.NOTIFY_TARGET
 $interval = if ($cfg.POLL_INTERVAL_SEC) { [int]$cfg.POLL_INTERVAL_SEC } else { 15 }
 ```
 
-**If config.json is missing**, run setup:
-
+If config.json is missing, run setup:
 ```powershell
-# 1. Detect connected OpenClaw channels
+# Detect connected OpenClaw channels
 $rawChannels = & openclaw channels list 2>&1 | Out-String
 $channels = @()
 foreach ($line in ($rawChannels -split "`n")) {
     if ($line -match "^\s*-\s+(\w+)\s+\w+:\s+configured") { $channels += $matches[1] }
 }
-if ($channels.Count -eq 0) {
-    Write-Host "No connected OpenClaw channels found. Connect a channel first." -ForegroundColor Red
-    return
-}
-# 2. Agent presents list and asks user to choose channel and provide target ID
-# 3. Save config
+if ($channels.Count -eq 0) { Write-Host "No channels found. Connect one first."; return }
+# Agent presents list, asks user to choose channel and provide target ID
+# Then save:
 New-Item -ItemType Directory -Force -Path "$HOME/.config/fb-inbox-forward" | Out-Null
-@{
-    NOTIFY_CHANNEL    = "<chosen-channel>"
-    NOTIFY_TARGET     = "<target-chat-id>"
-    POLL_INTERVAL_SEC = 15
-} | ConvertTo-Json | Set-Content "$HOME/.config/fb-inbox-forward/config.json" -Encoding UTF8
+@{ NOTIFY_CHANNEL="<channel>"; NOTIFY_TARGET="<chat-id>"; POLL_INTERVAL_SEC=15 } |
+    ConvertTo-Json | Set-Content "$HOME/.config/fb-inbox-forward/config.json" -Encoding UTF8
 ```
 
-**Restrict file permissions after saving:**
+Restrict permissions on all files in the config dir immediately after saving:
 ```powershell
-# Windows
-icacls "$HOME/.config/fb-inbox-forward/config.json" /inheritance:r /grant:r "$($env:USERNAME):(R,W)"
-# macOS / Linux
-# chmod 600 ~/.config/fb-inbox-forward/config.json
+$dir = "$HOME/.config/fb-inbox-forward"
+if ($env:OS -eq "Windows_NT") {
+    "config.json","worker.ps1","listener.log","listener.pid","listener-state.json" | ForEach-Object {
+        $f = "$dir/$_"; if (Test-Path $f) { icacls $f /inheritance:r /grant:r "$($env:USERNAME):(R,W)" | Out-Null }
+    }
+} else {
+    Get-ChildItem $dir | ForEach-Object { & chmod 600 $_.FullName }
+}
 ```
 
-> Never commit config files to version control.
+Never commit any file in ~/.config/fb-inbox-forward/ to version control.
 
 ---
 
-## STEP 2 — Core Actions
+## STEP 2 - Core Actions
 
-| Action | Command |
+| Action | How |
 |---|---|
-| Start listener | See BACKGROUND LISTENER section |
-| Stop listener | See BACKGROUND LISTENER section |
-| Check status | See BACKGROUND LISTENER section |
-| Test FB credentials | GET `/me` |
-| View log | `Get-Content "$HOME/.config/fb-inbox-forward/listener.log" -Tail 20` |
+| Start listener | See BACKGROUND LISTENER |
+| Stop listener | See BACKGROUND LISTENER |
+| Check status | See BACKGROUND LISTENER |
+| View log | Get-Content "$HOME/.config/fb-inbox-forward/listener.log" -Tail 20 |
+| Test credentials | GET /me endpoint |
 
-**Test FB credentials:**
+Test credentials:
 ```powershell
 $fb = Get-Content "$HOME/.config/fb-page/credentials.json" -Raw | ConvertFrom-Json
 $r  = Invoke-RestMethod "https://graph.facebook.com/v25.0/me?access_token=$($fb.FB_PAGE_TOKEN)" -ErrorAction Stop
-Write-Host "Connected as: $($r.name) (ID: $($r.id))"
+Write-Host "Connected as: $($r.name)"
 ```
 
 ---
 
-## STEP 3 — Error Handling
+## STEP 3 - Error Handling
 
 ```powershell
-try {
-    # ... API call ...
-} catch {
+try { } catch {
     $err  = $_.ErrorDetails.Message | ConvertFrom-Json -ErrorAction SilentlyContinue
     $code = $err.error.code
     $msg  = $err.error.message
@@ -98,24 +92,34 @@ try {
 
 | Code | Meaning | Fix |
 |---|---|---|
-| 190 | Token expired/invalid | Re-generate Page token in fb-page skill |
-| 10 / 200 | Permission denied | Add `pages_read_engagement` to your app |
-| 368 | Rate limited | Increase POLL_INTERVAL_SEC in config.json (try 60+) |
+| 190 | Token expired/invalid | Re-generate token in fb-page skill |
+| 10 / 200 | Permission denied | Add pages_read_engagement to your app |
+| 368 | Rate limited | Increase POLL_INTERVAL_SEC (try 60+) |
 | 100 | Invalid parameter | Check FB_PAGE_ID in fb-page credentials |
 
 ---
 
 ## BACKGROUND LISTENER
 
-> 🔔 **Opt-in only. Only start when the user explicitly asks.**
-> Polls the Facebook Page inbox every `POLL_INTERVAL_SEC` seconds.
-> Forwards new messages (sender name + message text + conv ID) via `openclaw message send`
-> to `NOTIFY_CHANNEL` / `NOTIFY_TARGET` from config.json — nothing is hardcoded.
-> Uses a 60-second lookback window on first start to catch recent messages.
+> OPTIONAL - only start when the user explicitly asks.
+> Polls Facebook Page inbox every POLL_INTERVAL_SEC seconds.
+> Forwards: sender name + message text + conv ID via openclaw message send.
+> Target comes from config.json NOTIFY_CHANNEL / NOTIFY_TARGET - nothing hardcoded.
+> Worker reads credentials fresh from disk at runtime - no tokens embedded in scripts.
+> All runtime files are permission-restricted immediately after creation.
+> Logs contain sender name and conv ID only - not message content.
 
 ### Start
 
 ```powershell
+$configDir = "$HOME/.config/fb-inbox-forward"
+$pidFile   = "$configDir/listener.pid"
+$stateFile = "$configDir/listener-state.json"
+$logFile   = "$configDir/listener.log"
+$worker    = "$configDir/worker.ps1"
+
+# Worker reads credentials fresh from disk - no tokens as literals
+@'
 $fb        = Get-Content "$HOME/.config/fb-page/credentials.json" -Raw | ConvertFrom-Json
 $cfg       = Get-Content "$HOME/.config/fb-inbox-forward/config.json" -Raw | ConvertFrom-Json
 $token     = $fb.FB_PAGE_TOKEN
@@ -124,61 +128,53 @@ $channel   = $cfg.NOTIFY_CHANNEL
 $target    = $cfg.NOTIFY_TARGET
 $interval  = if ($cfg.POLL_INTERVAL_SEC) { [int]$cfg.POLL_INTERVAL_SEC } else { 15 }
 $lookback  = 60
+$stateFile = "$HOME/.config/fb-inbox-forward/listener-state.json"
+$logFile   = "$HOME/.config/fb-inbox-forward/listener.log"
+$state     = if (Test-Path $stateFile) { Get-Content $stateFile -Raw | ConvertFrom-Json } else { @{} }
 
-$configDir = "$HOME/.config/fb-inbox-forward"
-$pidFile   = "$configDir/listener.pid"
-$stateFile = "$configDir/listener-state.json"
-$logFile   = "$configDir/listener.log"
-$tmpScript = Join-Path ([System.IO.Path]::GetTempPath()) "fb-inbox-forward-worker.ps1"
-
-@"
-`$token     = '$token'
-`$pageId    = '$pageId'
-`$channel   = '$channel'
-`$target    = '$target'
-`$interval  = $interval
-`$lookback  = $lookback
-`$stateFile = '$stateFile'
-`$logFile   = '$logFile'
-`$state     = if (Test-Path `$stateFile) { Get-Content `$stateFile -Raw | ConvertFrom-Json } else { @{} }
-
-function Write-Log { param([string]`$m); Add-Content `$logFile "`$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')  `$m" -Encoding UTF8 }
+function Write-Log { param([string]$m); Add-Content $logFile "$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')  $m" -Encoding UTF8 }
 Write-Log 'Listener started.'
 
-while (`$true) {
+while ($true) {
     try {
-        `$convs = (Invoke-RestMethod "https://graph.facebook.com/v25.0/`$pageId/conversations?fields=id,participants,updated_time&limit=20&access_token=`$token").data
-        foreach (`$conv in `$convs) {
-            `$lastSeen = if (`$state."`$(`$conv.id)") { [datetime]::Parse(`$state."`$(`$conv.id)") } else { (Get-Date).ToUniversalTime().AddSeconds(-`$lookback) }
-            if ([datetime]::Parse(`$conv.updated_time) -le `$lastSeen) { continue }
-            `$msgs = (Invoke-RestMethod "https://graph.facebook.com/v25.0/`$(`$conv.id)/messages?fields=message,from,created_time,sticker,attachments&limit=10&access_token=`$token").data
-            foreach (`$msg in (`$msgs | Sort-Object created_time)) {
-                if ([datetime]::Parse(`$msg.created_time) -le `$lastSeen) { continue }
-                `$senderId = if (`$msg.from) { `$msg.from.id } else { '' }
-                if (`$senderId -eq `$pageId) { continue }
-                `$sender = if (`$msg.from) { `$msg.from.name } else { 'Unknown' }
-                `$text   = if (`$msg.message) { `$msg.message } elseif (`$msg.sticker) { '[sticker]' } else { '[attachment]' }
-                `$notify = "📨 New FB Message``nFrom: `$sender``nMessage: `$text``nConv ID: `$(`$conv.id)"
-                Write-Log "FORWARD | `$sender | `$text"
-                Start-Job -ScriptBlock {
-                    param(`$ch, `$tg, `$m)
-                    & openclaw message send --channel `$ch --target `$tg --message `$m 2>`$null
-                } -ArgumentList `$channel, `$target, `$notify | Out-Null
+        $convs = (Invoke-RestMethod "https://graph.facebook.com/v25.0/$pageId/conversations?fields=id,updated_time&limit=20&access_token=$token").data
+        foreach ($conv in $convs) {
+            $lastSeen = if ($state."$($conv.id)") { [datetime]::Parse($state."$($conv.id)") } else { (Get-Date).ToUniversalTime().AddSeconds(-$lookback) }
+            if ([datetime]::Parse($conv.updated_time) -le $lastSeen) { continue }
+            $msgs = (Invoke-RestMethod "https://graph.facebook.com/v25.0/$($conv.id)/messages?fields=message,from,created_time&limit=10&access_token=$token").data
+            foreach ($msg in ($msgs | Sort-Object created_time)) {
+                if ([datetime]::Parse($msg.created_time) -le $lastSeen) { continue }
+                $senderId = if ($msg.from) { $msg.from.id } else { '' }
+                if ($senderId -eq $pageId) { continue }
+                $sender = if ($msg.from) { $msg.from.name } else { 'Unknown' }
+                $text   = if ($msg.message) { $msg.message } elseif ($msg.sticker) { '[sticker]' } else { '[attachment]' }
+                $notify = "New FB Message`nFrom: $sender`nMessage: $text`nConv ID: $($conv.id)"
+                Write-Log "FORWARD | $sender | Conv:$($conv.id)"
+                Start-Job -ScriptBlock { param($ch,$tg,$m); & openclaw message send --channel $ch --target $tg --message $m 2>$null } -ArgumentList $channel,$target,$notify | Out-Null
             }
-            `$state | Add-Member -NotePropertyName `$conv.id -NotePropertyValue `$conv.updated_time -Force
+            $state | Add-Member -NotePropertyName $conv.id -NotePropertyValue $conv.updated_time -Force
         }
-        `$state | ConvertTo-Json -Depth 3 | Set-Content `$stateFile -Encoding UTF8
-    } catch { Write-Log "Error: `$_" }
-    Start-Sleep -Seconds `$interval
+        $state | ConvertTo-Json -Depth 3 | Set-Content $stateFile -Encoding UTF8
+    } catch { Write-Log "Error: $_" }
+    Start-Sleep -Seconds $interval
 }
-"@ | Set-Content $tmpScript -Encoding UTF8
+'@ | Set-Content $worker -Encoding UTF8
 
+# Restrict all runtime files before starting
 if ($env:OS -eq "Windows_NT") {
-    $proc = Start-Process powershell -ArgumentList "-NonInteractive -WindowStyle Hidden -File `"$tmpScript`"" -PassThru -WindowStyle Hidden
+    $worker,$logFile,$stateFile,$pidFile | ForEach-Object {
+        New-Item $_ -Force -ItemType File -ErrorAction SilentlyContinue | Out-Null
+        icacls $_ /inheritance:r /grant:r "$($env:USERNAME):(R,W)" | Out-Null
+    }
+    $proc = Start-Process powershell -ArgumentList "-NonInteractive -WindowStyle Hidden -File `"$worker`"" -PassThru -WindowStyle Hidden
 } else {
-    $proc = Start-Process pwsh -ArgumentList "-NonInteractive -File `"$tmpScript`"" -PassThru -RedirectStandardOutput "/dev/null" -RedirectStandardError "/dev/null"
+    $worker,$logFile,$stateFile,$pidFile | ForEach-Object {
+        New-Item $_ -Force -ItemType File -ErrorAction SilentlyContinue | Out-Null
+        & chmod 600 $_
+    }
+    $proc = Start-Process pwsh -ArgumentList "-NonInteractive -File `"$worker`"" -PassThru -RedirectStandardOutput "/dev/null" -RedirectStandardError "/dev/null"
 }
-@{ pid=$proc.Id; startedAt=(Get-Date).ToString("yyyy-MM-dd HH:mm:ss"); script=$tmpScript } | ConvertTo-Json | Set-Content $pidFile -Encoding UTF8
+@{ pid=$proc.Id; startedAt=(Get-Date).ToString("yyyy-MM-dd HH:mm:ss") } | ConvertTo-Json | Set-Content $pidFile -Encoding UTF8
 Write-Host "[fb-inbox-forward] Started! PID: $($proc.Id)" -ForegroundColor Green
 ```
 
@@ -200,10 +196,8 @@ if (Test-Path $pidFile) {
 $pidFile = "$HOME/.config/fb-inbox-forward/listener.pid"
 if (Test-Path $pidFile) {
     $s = Get-Content $pidFile -Raw | ConvertFrom-Json
-    try {
-        Get-Process -Id $s.pid -ErrorAction Stop | Out-Null
-        Write-Host "[RUNNING] PID: $($s.pid)  Started: $($s.startedAt)" -ForegroundColor Green
-    } catch { Write-Host "[STOPPED] Process not found." -ForegroundColor DarkGray }
+    try { Get-Process -Id $s.pid -ErrorAction Stop | Out-Null; Write-Host "[RUNNING] PID: $($s.pid)  Started: $($s.startedAt)" -ForegroundColor Green }
+    catch { Write-Host "[STOPPED] Process not found." -ForegroundColor DarkGray }
 } else { Write-Host "[STOPPED] No listener running." -ForegroundColor DarkGray }
 ```
 
@@ -211,9 +205,12 @@ if (Test-Path $pidFile) {
 
 ## AGENT RULES
 
-- **Load FB credentials from `~/.config/fb-page/credentials.json`.** If missing, tell user to set up fb-page skill first.
-- **Load forwarding config from `~/.config/fb-inbox-forward/config.json`.** If missing, run setup: detect channels via `openclaw channels list`, ask user to choose and provide target ID, then save.
-- **Background listener is opt-in.** Never start unless the user explicitly asks.
-- **No hardcoded IDs or tokens.** All targets and secrets come from config files.
-- **On any error:** parse `error.code`, map to the table above, tell user exactly what to do.
-- **OS detection:** `$env:OS -eq "Windows_NT"` → `powershell`; otherwise → `pwsh`.
+- Load FB credentials from ~/.config/fb-page/credentials.json. If missing, tell user to set up fb-page skill first.
+- Load forwarding config from ~/.config/fb-inbox-forward/config.json. If missing, run setup: detect channels via openclaw channels list, ask user to choose and provide target ID, then save.
+- Background listener is opt-in. Never start unless user explicitly asks.
+- Never embed tokens as literals in scripts. Worker always reads credentials fresh from disk at runtime.
+- Restrict permissions on all runtime files (worker.ps1, log, pid, state) immediately after creation.
+- Logs must not contain message content. Log sender name and conv ID only.
+- No hardcoded IDs or tokens. All targets and secrets come from config files.
+- On any error: parse error.code, map to the table above, tell user exactly what to do.
+- OS detection: env:OS eq Windows_NT -> powershell; otherwise -> pwsh.
