@@ -1,7 +1,7 @@
-﻿---
+---
 name: fb-inbox-forward
 description: "Requires: powershell/pwsh + openclaw CLI. Reads ~/.config/fb-page/credentials.json (FB_PAGE_TOKEN, FB_PAGE_ID). Polls Facebook Page inbox via graph.facebook.com and forwards new inbound messages (sender name + full message text + conv ID) to a configured OpenClaw channel (NOTIFY_CHANNEL/NOTIFY_TARGET in ~/.config/fb-inbox-forward/config.json). Worker script written to ~/.config/fb-inbox-forward/worker.ps1 with restricted permissions - no tokens embedded as literals, credentials read fresh from disk. Listener is opt-in only - never starts without explicit user request. Logs record sender name and conv ID only; message text forwarded to channel target but never written to disk. Ensure destination is trusted and forwarding complies with your privacy/terms. All API calls go to graph.facebook.com only."
-metadata: {"openclaw":{"emoji":"[fb-fwd]","requires":{"bins":["openclaw"],"anyBins":["powershell","pwsh"]}}}
+metadata: {"openclaw":{"emoji":"[fb-fwd]","requires":{"anyBins":["powershell","pwsh"]}}}
 ---
 
 # fb-inbox-forward
