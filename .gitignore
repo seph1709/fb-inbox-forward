@@ -1,0 +1,4 @@
+﻿*.pid
+*.log
+listener-state.json
+.clawhub/

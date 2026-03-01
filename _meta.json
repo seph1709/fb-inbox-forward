@@ -1,0 +1,36 @@
+﻿{
+    "requires":  {
+                     "binaries":  [
+                                      "powershell",
+                                      "openclaw"
+                                  ],
+                     "config":  [
+                                    "~/.config/fb-page/credentials.json",
+                                    "~/.config/fb-inbox-forward/config.json"
+                                ]
+                 },
+    "persistence":  {
+                        "code":  "inline",
+                        "optional":  true,
+                        "description":  "Polls Facebook Page conversations every POLL_INTERVAL_SEC seconds. Forwards new messages via openclaw message send to user-chosen channel detected via openclaw channels list.",
+                        "type":  "background-process"
+                    },
+    "publishedAt":  "2026-03-01T12:05:48Z",
+    "runtime":  [
+                    "powershell",
+                    "pwsh"
+                ],
+    "ownerId":  "seph1709",
+    "version":  "1.0.2",
+    "credentials":  {
+                        "path":  "~/.config/fb-page/credentials.json",
+                        "fields":  [
+                                       "FB_PAGE_TOKEN",
+                                       "FB_PAGE_ID"
+                                   ],
+                        "sensitive":  true,
+                        "type":  "file",
+                        "notes":  "FB credentials synced from fb-page skill. Forwarding config in fb-inbox-forward/config.json."
+                    },
+    "slug":  "fb-inbox-forward"
+}
